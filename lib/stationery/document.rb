@@ -18,15 +18,39 @@ module Stationery
     INFO_KEYS = { title: :Title, author: :Author, subject: :Subject, keywords: :Keywords, creator: :Creator,
                   producer: :Producer }.freeze
 
+    # The settings every document starts from, shareable as they are.
+    @config = Stationery.shareable(
+      { page: { size: :letter, margin: 36 }, families: {}, fallbacks: [], text: {}, metadata: {},
+        templates: [], regions: [], strict: false, tagged: false, incremental: false, images: {},
+        attachments: [], shaping: {}, print: {}, missing_glyphs: :raise }
+    )
+
     class << self
-      def config
-        @config ||= if superclass.respond_to?(:config)
-                      superclass.config.transform_values(&:dup)
-                    else
-                      { page: { size: :letter, margin: 36 }, families: {}, fallbacks: [], text: {}, metadata: {},
-                        templates: [], regions: [], strict: false, tagged: false, incremental: false, images: {},
-                        attachments: [], shaping: {}, print: {}, missing_glyphs: :raise }
-                    end
+      # The class's settings, built when the class is defined: each of its
+      # parent's copied, so a subclass's never reaches the parent, then
+      # changed by the calls of its class body, on the main Ractor. A render
+      # only reads them, and a non-main Ractor can once finalize! has run.
+      attr_reader :config
+
+      def inherited(subclass)
+        super
+        subclass.instance_variable_set(:@config, config.transform_values(&:dup))
+      end
+
+      # Ends the class's boot: its settings are frozen, and made
+      # Ractor-shareable as far as they can be (Stationery.settled), so the
+      # class renders inside any Ractor when all of them are. A block of its
+      # page templates, headers or footers that uses an unshareable local
+      # from around it, or a shaper that is not shareable itself, is kept as
+      # it is: the class then renders on the main Ractor only, as before.
+      # Never raises. Stationery.finalize! runs it on every class loaded by
+      # then; run it yourself on a class loaded later. After it the settings
+      # cannot change (FrozenError), and a subclass has its own. Answers the
+      # class; running it again changes nothing.
+      def finalize!
+        # rubocop:disable-next ThreadSafety/ClassInstanceVariable -- written at boot on the main Ractor, before any render
+        @config = Stationery.settled(config) unless config.frozen?
+        self
       end
 
       # `size:` is a name of Page::SIZES, [width, height] in points or with

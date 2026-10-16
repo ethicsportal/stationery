@@ -1,7 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "stationery/version"
+require_relative "stationery/shareable"
 require_relative "stationery/errors"
+require_relative "stationery/store"
+require_relative "stationery/lru"
+require_relative "stationery/memo"
 require_relative "stationery/instrumentation"
 require_relative "stationery/pdf/types"
 require_relative "stationery/pdf/serializer"
@@ -202,11 +206,41 @@ require_relative "stationery/document"
 
 # Pure-Ruby PDF documents built from Phlex-style components.
 module Stationery
-  @font_paths = []
+  # Appended to at boot, on the main Ractor (the Railtie, an app's own
+  # setup); finalize! freezes it.
+  @font_paths = [] # rubocop:disable ThreadSafety/MutableClassInstanceVariable
 
   class << self
     # Directories searched for font files; the Railtie appends the app's.
+    # Frozen by finalize!.
     attr_reader :font_paths
+
+    # Ends boot: what the gem holds for every render is frozen, and
+    # Ractor-shareable as far as the app's settings let it be. `font_paths`
+    # is frozen, as a frozen copy of each directory; the instrumenter in use
+    # is kept, so one loaded later is not picked up; and every document class
+    # loaded by then is finalized (Document.finalize!), with its subclasses.
+    # Nothing it cannot make shareable raises: it is kept as it is, for the
+    # main Ractor. Run it once everything that adds a font path or defines a
+    # document class at boot has; the Railtie runs it after the app has
+    # initialized. Answers Stationery; running it again finalizes only the
+    # classes loaded since.
+    def finalize!
+      # rubocop:disable-next ThreadSafety/ClassInstanceVariable -- written at boot on the main Ractor, before any render
+      @font_paths = @font_paths.map { |path| path.to_s.dup.freeze }.freeze
+      Instrumentation.finalize!
+      finalize_documents(Document)
+      self
+    end
+
+    private
+
+    def finalize_documents(parent)
+      parent.subclasses.each do |document|
+        document.finalize!
+        finalize_documents(document)
+      end
+    end
   end
   # Names of the font families shipped inside the gem.
   def self.bundled_fonts = Fonts::Bundled.names

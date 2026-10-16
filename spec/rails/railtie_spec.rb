@@ -34,14 +34,34 @@ RSpec.describe Stationery::Railtie do
     expect(response.body).to start_with("%PDF")
   end
 
+  it "finalizes Stationery once the app has initialized" do
+    expect(Stationery.font_paths).to be_frozen
+    expect(Ractor.shareable?(Stationery.font_paths)).to be(true) if defined?(Ractor)
+    expect(Stationery.instrumenter).to be(ActiveSupport::Notifications)
+  end
+
+  it "finalizes the document classes the app had loaded by then" do
+    expect(BootedPdf.config).to be_frozen
+    expect(Ractor.shareable?(BootedPdf.config)).to be(true) if defined?(Ractor)
+    expect { BootedPdf.page(size: :a4) }.to raise_error(FrozenError)
+  end
+
+  it "boots with a document class whose settings cannot be made shareable, keeping those as they are" do
+    expect(BootedDraftPdf.config).to be_frozen
+    expect(BootedDraftPdf.config[:shaping][:shaper]).to be(BOOTED_SHAPER)
+    expect(BOOTED_SHAPER).not_to be_frozen
+    expect(BootedDraftPdf.new.to_pdf).to start_with("%PDF")
+    expect(BOOTED_SHAPER.texts).to include("Booted", "Draft")
+  end
+
   describe "initializers" do
     let(:root) { Dir.mktmpdir }
     let(:fonts) { File.join(root, "vendor/fonts") }
 
-    after do
-      Stationery.font_paths.delete(fonts)
-      FileUtils.remove_entry(root)
-    end
+    # The app above has booted, and so finalized: each example adds its font
+    # paths on a fresh boot of its own.
+    around { |example| BootState.around(&example) }
+    after { FileUtils.remove_entry(root) }
 
     def run_initializer(name, **config)
       options = ActiveSupport::OrderedOptions[config]

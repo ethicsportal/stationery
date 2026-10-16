@@ -69,7 +69,7 @@ module Stationery
 
       def initialize(features)
         @features = features.freeze
-        @plans = {}
+        @liga = plan_for(LIGA)
         freeze
       end
 
@@ -79,17 +79,21 @@ module Stationery
       # [[gid, number of source glyphs it stands for], ...] after applying the
       # lookups of `tags` (feature tag Strings) in LookupList order, each once.
       # Within a lookup the first subtable matching at a position wins and its
-      # glyph is not matched again by that lookup.
-      def substitute(gids, tags = LIGA)
-        plan(tags).reduce(gids.map { |gid| [gid, 1] }) { |glyphs, subtables| apply(subtables, glyphs) }
+      # glyph is not matched again by that lookup. `plan:` is #plan of the
+      # tags, for a caller that keeps it.
+      def substitute(gids, tags = LIGA, plan: plan(tags))
+        plan.reduce(gids.map { |gid| [gid, 1] }) { |glyphs, subtables| apply(subtables, glyphs) }
       end
+
+      # The lookups the tags name, merged and ordered: those of the default
+      # tags made with the parse, so it never changes once built, any other
+      # list's when asked (each Font keeps the plans it uses).
+      def plan(tags) = tags == LIGA ? @liga : plan_for(tags)
 
       private
 
-      # The lookups the tags name, merged and ordered; remembered per tag list.
-      def plan(tags)
-        @plans[tags] ||= tags.flat_map { |tag| @features[tag] || [] }.uniq(&:first).sort_by(&:first)
-                             .map(&:last).freeze
+      def plan_for(tags)
+        tags.flat_map { |tag| @features[tag] || [] }.uniq(&:first).sort_by(&:first).map(&:last).freeze
       end
 
       def apply(subtables, glyphs)
