@@ -85,7 +85,7 @@ Acrobat cannot be driven in CI, so before a release pull request merges the main
 
 - Pure Ruby, stdlib only. What the gem cannot do is a warning (`Warnings::...`), not approximated and not raised where a document can still render. No `rescue` that swallows, no `&.` over a nil you have not explained. No shared mutable state at class level (`rubocop-thread_safety`).
 - Unit specs in `spec/stationery/`, whole documents in `spec/integration/`, Rails in `spec/rails/` (`BUNDLE_GEMFILE=gemfiles/rails.gemfile bundle exec rake spec:rails`). Assert through `lib/stationery/testing/` on what was laid out and drawn, not on a PDF's bytes; byte comparisons pin the clock. Every branch of a public DSL option is covered (80% minimum).
-- An example reads nothing from `spec/`, has a `preview`, and is painted on a non-PDF canvas by `spec/stationery/document_paint_on_spec.rb`. Look at what is drawn: `bundle exec stationery render <file>.rb --png`.
+- A new example reads nothing from `spec/` except the font fixtures in `spec/fixtures/fonts/` (`examples/invoice.rb` reads them), has a `preview`, and is painted on a non-PDF canvas by `spec/stationery/document_paint_on_spec.rb`. Look at what is drawn: `bundle exec stationery render <file>.rb --png`.
 
 ## Performance
 
