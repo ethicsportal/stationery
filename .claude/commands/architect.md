@@ -46,7 +46,7 @@ A runtime dependency or native code; a CSS layout engine; shaping or bidi in the
 
 ## Before the pull request
 
-Run the `fable-validator` agent on the combined diff first; do not open or merge on BLOCK.
+Run the `flow:fable-validator` agent on the combined diff first; do not open or merge on BLOCK.
 
 The checks are `AGENTS.md`'s: `bundle exec rspec`, `bundle exec rubocop lib spec examples Rakefile`, `bundle exec rake metrics`, `rake verify:conformance` for tagging, and the changed renders looked at as PNGs.
 

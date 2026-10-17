@@ -31,7 +31,7 @@ A layout node, the SVG renderer and a `canvas { |c| … }` block call only what 
    ```
 
 4. **A changelog bullet** under `## Unreleased` in `CHANGELOG.md`, and the README and docs pages that state what the change touches are updated with it. Several docs pages embed sections of the README, so the README is what counts for them.
-5. **Merged when CI is green**, with `main` merged into the branch first when `main` has moved (merged, not rebased).
+5. **Merged when CI is green**, with `main` merged into the branch first when `main` has moved (merged, never rebased, never force-pushed). A pull request stacked on another is pointed at `main` before its parent merges.
 
 ## The metrics gate
 
@@ -66,8 +66,8 @@ A change to layout is rendered to a picture (`pdftoppm -png -r 72 file.pdf out`)
 ## Labels
 
 Every pull request carries exactly one `type` label and at least one `area`
-label from `.github/labels.yml`, never a `status` label. `/plan` labels the
-issue, `/lfg` copies the issue's `type` and `area` labels onto the PR (never
+label from `.github/labels.yml`, never a `status` label. `/flow:plan` labels the
+issue, `/flow:lfg` copies the issue's `type` and `area` labels onto the PR (never
 `plan` or another status label). Without an issue, the type comes from the
 change's conventional-commit prefix and the areas from
 `bin/labels infer $(git diff --name-only origin/main...HEAD)`. Labels change in
@@ -81,6 +81,31 @@ Releases are cut by the maintainer with `bin/release` (`bin/release --dry-run` s
 
 Acrobat cannot be driven in CI, so before a release pull request merges the maintainer opens a fixed set from `bundle exec rake verify:readers:render` (`tmp/readers/`) in Acrobat Reader on macOS **and** Windows: `invoice`, `form`, `report`, `e_invoice`, `accessible_report`, `conforming_signed_form` and `encrypted_invoice` (password `reader`). On each: it opens without a warning bar; the form fills and prints; links and bookmarks jump; the attachment opens; the signature panel reads the signature; the tag tree shows in Acrobat's Accessibility panel (Pro) or its reading order. The result is a checklist in the release pull request's body. No claim of Adobe compatibility is made beyond what this step saw.
 
+## Code and specs
+
+- Pure Ruby, stdlib only. What the gem cannot do is a warning (`Warnings::...`), not approximated and not raised where a document can still render. No `rescue` that swallows, no `&.` over a nil you have not explained. No shared mutable state at class level (`rubocop-thread_safety`).
+- Unit specs in `spec/stationery/`, whole documents in `spec/integration/`, Rails in `spec/rails/` (`BUNDLE_GEMFILE=gemfiles/rails.gemfile bundle exec rake spec:rails`). Assert through `lib/stationery/testing/` on what was laid out and drawn, not on a PDF's bytes; byte comparisons pin the clock. Every branch of a public DSL option is covered (80% minimum).
+- An example reads nothing from `spec/`, has a `preview`, and is painted on a non-PDF canvas by `spec/stationery/document_paint_on_spec.rb`. Look at what is drawn: `bundle exec stationery render <file>.rb --png`.
+
+## Performance
+
+Measure before and after on the same machine, or make no claim; `/ruby-gem:perf` does it with `main` in a worktree. `bundle exec rake bench` is time against Prawn (not in CI: wall time on a shared machine is noise; within the ± is "within noise", and say whether a number is one operation or a whole render). `bundle exec rake metrics` is what CI holds. Also `PROFILE=1 bundle exec ruby -Ilib benchmark/profile.rb` (StackProf) and `bundle exec rake memory` (long documents). Hot paths, where a change comes with numbers: text wrapping and measurement (`text/`, `fonts/`), layout and pagination (`layout/`), tables, images, the writer and its compression (`pdf/`). Never optimise a path the profile does not show hot, and never trade correctness or conformance for a win the numbers do not show.
+
+## Workflow
+
+- **Verify:** `bundle exec rspec` (exit status) · `bundle exec rubocop lib spec examples Rakefile` · `bundle exec rake metrics` · tagging, PDF/A or PDF/UA touched: `bundle exec rake verify:conformance` · `docs/`: `cd docs && bundle exec rubocop && bundle exec rspec`
+- **Specs:** fast loop `bundle exec rspec <file>`; full suite `bundle exec rspec`; Rails `BUNDLE_GEMFILE=gemfiles/rails.gemfile bundle exec rake spec:rails`; two worktrees at once: yes
+- **CI:** required `Lint`, `Ruby 3.4`, `Ruby 4.0`, `Docs site`, both `conformance / ...`; `Metrics gate`, `PDF/A and PDF/UA (veraPDF)`, `Readers (macOS, PDFKit)`, `Rails` are not required but must be green; full suite on the PR; failure report none
+- **Review bot:** cubic (threads must be resolved)
+- **Merge:** squash — `gh pr merge <PR> --squash --delete-branch`
+- **PR contract:** `## Summary` (`Closes #N`), `## Test plan`; labels per `## Labels`; layout change: say what the rendered picture showed; conformance claim: name the veraPDF rule
+- **Conflicts:** `CHANGELOG.md` — both sides' bullets under `## Unreleased`, a bullet both changed takes main's, re-read after; `lib/stationery/version.rb` — main's; `docs/Gemfile.lock` — main's with the `stationery (X.Y.Z)` pin set to `version.rb` under `PATH` and `CHECKSUMS`, never `bundle lock`; `benchmark/baseline.json` — main's, then `bundle exec rake metrics`
+- **Worktree setup:** `bundle install` (`cd docs && bundle install` for docs work); undo none
+- **Release:** `bin/release <v>`, the maintainer's, never unasked; changelog `CHANGELOG.md`, heading `## X.Y.Z (YYYY-MM-DD)` under `## Unreleased`; prep `bundle exec rake metrics:update`; lockfiles `docs/Gemfile.lock`; docs `deploy-docs.yml` on release; human: the Acrobat Reader checklist in `## Releases`
+- **Main health:** the CI status of main's head
+- **Upstream:** libraries we own `zoolutions/*`; scrub none
+- **Bench:** `bundle exec rake bench`; `bundle exec rake metrics` (CI holds `benchmark/baseline.json`); hot paths in `## Performance`
+
 ## Out of scope by design
 
 - A CSS layout engine: `html` reads a subset and reports the rest as `Warnings::UnsupportedCss`.
@@ -90,15 +115,7 @@ Acrobat cannot be driven in CI, so before a release pull request merges the main
 
 ## Models and agents
 
-**Models.** Sessions run on `opus` (Opus 5.5) with `fable` (Fable 5.1) as the advisor (`.claude/settings.json`). Fable is spent where judgment matters most: `/plan` runs on Fable, the advisor is consulted at decision points (before choosing an approach, a schema or public API, a migration, a dependency, anything irreversible, and when a failure repeats), and the `fable-validator` agent checks every finished implementation before its pull request opens (`/lfg`, Phase 6.5). Commands pin their tier by alias, never by full model ID: `opus` for orchestration, security, full PR review, payments and production debugging; `sonnet` for the implementation specialists and TDD; `haiku` for mechanical scans. Every spawned agent names its `model:`; one that does not runs on `sonnet` (`CLAUDE_CODE_SUBAGENT_MODEL`), never on the session's model. Plan mode cannot take a model of its own: it runs on Opus and asks the advisor.
-
-| Command | Tier | For |
-|---|---|---|
-| `/plan` | `fable` | A plan as an issue or `plans/*.md`, before `/lfg` |
-| `/lfg`, `/architect`, `/finish-prs`, `/github-review-pr`, `/review-pr`, `/security` | `opus` | An issue end to end; work across layers; a queue of pull requests; a full review pass; a review; a security audit |
-| `/tdd`, `/perf`, `/github-review-failures`, `/github-review-comments` | `sonnet` | Red, green, refactor; `rake bench` and `rake metrics` against `main`; red CI; review threads |
-
-The commands are in `.claude/commands/`, their shared rules in `.claude/rules/`. The docs site keeps its own: `docs/AGENTS.md` and the `write-docs-page` skill in `docs/.claude/skills/`.
+Sessions run on `opus` with `fable` as the advisor (`.claude/settings.json`); consult it before choosing an approach, a public API or option name, a dependency, anything irreversible, and when a failure repeats. Every spawned agent names its `model:`; one that does not runs on `sonnet` (`CLAUDE_CODE_SUBAGENT_MODEL`). The workflow commands come from the `flow` and `ruby-gem` plugins (`/flow:lfg`, `/flow:plan`, `/flow:finish-prs`, `/ruby-gem:perf`, ...); this repository keeps `/architect` and `/security` in `.claude/commands/`. The docs site keeps its own: `docs/AGENTS.md` and the `write-docs-page` skill in `docs/.claude/skills/`.
 
 ## What has gone wrong before
 
